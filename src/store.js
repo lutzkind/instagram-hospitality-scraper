@@ -135,23 +135,44 @@ function createStore(config) {
           timestamp,
         });
 
-        for (const hashtag of input.hashtags) {
-          db.prepare(
-            `
-              INSERT INTO shards (
-                job_id, shard_type, shard_key, payload_json, status, next_run_at,
-                created_at, updated_at
-              ) VALUES (
-                @jobId, 'hashtag', @shardKey, @payloadJson, 'pending', @timestamp,
-                @timestamp, @timestamp
-              )
-            `
-          ).run({
-            jobId: input.id,
-            shardKey: hashtag,
-            payloadJson: JSON.stringify({ hashtag }),
-            timestamp,
-          });
+        if ((input.mode || "discovery") === "safe") {
+          for (const username of input.usernames || []) {
+            db.prepare(
+              `
+                INSERT INTO shards (
+                  job_id, shard_type, shard_key, payload_json, status, next_run_at,
+                  created_at, updated_at
+                ) VALUES (
+                  @jobId, 'profile', @shardKey, @payloadJson, 'pending', @timestamp,
+                  @timestamp, @timestamp
+                )
+              `
+            ).run({
+              jobId: input.id,
+              shardKey: username,
+              payloadJson: JSON.stringify({ username, sourceMode: "safe" }),
+              timestamp,
+            });
+          }
+        } else {
+          for (const hashtag of input.hashtags) {
+            db.prepare(
+              `
+                INSERT INTO shards (
+                  job_id, shard_type, shard_key, payload_json, status, next_run_at,
+                  created_at, updated_at
+                ) VALUES (
+                  @jobId, 'hashtag', @shardKey, @payloadJson, 'pending', @timestamp,
+                  @timestamp, @timestamp
+                )
+              `
+            ).run({
+              jobId: input.id,
+              shardKey: hashtag,
+              payloadJson: JSON.stringify({ hashtag }),
+              timestamp,
+            });
+          }
         }
       })();
 
@@ -690,6 +711,30 @@ function createStore(config) {
         `
           INSERT INTO app_settings (key, value_json, updated_at)
           VALUES ('nocodb_config', @valueJson, @timestamp)
+          ON CONFLICT(key) DO UPDATE SET
+            value_json = excluded.value_json,
+            updated_at = excluded.updated_at
+        `
+      ).run({ valueJson: JSON.stringify(merged), timestamp: nowIso() });
+      return merged;
+    },
+
+    getInstagramRuntimeConfig(defaults = {}) {
+      const row = db
+        .prepare(
+          `SELECT value_json FROM app_settings WHERE key = 'instagram_runtime_config'`
+        )
+        .get();
+      return row ? { ...defaults, ...JSON.parse(row.value_json) } : { ...defaults };
+    },
+
+    saveInstagramRuntimeConfig(input = {}, defaults = {}) {
+      const current = this.getInstagramRuntimeConfig(defaults);
+      const merged = { ...current, ...(input || {}) };
+      db.prepare(
+        `
+          INSERT INTO app_settings (key, value_json, updated_at)
+          VALUES ('instagram_runtime_config', @valueJson, @timestamp)
           ON CONFLICT(key) DO UPDATE SET
             value_json = excluded.value_json,
             updated_at = excluded.updated_at

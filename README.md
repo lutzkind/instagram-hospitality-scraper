@@ -4,9 +4,11 @@ Instagram hospitality lead scraper built in the same long-running dashboard styl
 
 ## What it does
 
-- accepts a `country + hospitality type + hashtags`
+- accepts a `country + hospitality type + hashtags` for discovery mode
+- accepts `country + hospitality type + usernames/profile URLs` for safe mode
 - creates resumable hashtag discovery jobs in SQLite
 - discovers candidate profiles from hashtags when `IG_SESSION_ID` is configured
+- extracts known public profile targets in safe mode without needing an Instagram session
 - extracts public profile-level business fields from Instagram's `web_profile_info` JSON endpoint
 - filters out obvious creators / influencers and scores hospitality relevance
 - assigns a country confidence score
@@ -48,7 +50,8 @@ Hashtag discovery is the risky part and requires:
 
 - `IG_SESSION_ID`
 
-Without `IG_SESSION_ID`, jobs still run but hashtag shards will not discover any profiles.
+Without `IG_SESSION_ID`, discovery jobs still run but hashtag shards will not discover any profiles.
+Safe mode does not need `IG_SESSION_ID`.
 
 This split is deliberate:
 

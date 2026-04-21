@@ -5,6 +5,7 @@ const {
   fetchProfileInfo,
 } = require("./instagram");
 const { classifyHospitalityLead } = require("./classifier");
+const { getInstagramRuntimeConfig } = require("./runtime-config");
 
 function createWorker({ store, config }) {
   let timer = null;
@@ -80,7 +81,8 @@ function createWorker({ store, config }) {
 
   async function processHashtagShard(job, shard) {
     const tag = shard.payload?.hashtag || shard.shardKey;
-    const discovery = await discoverProfilesByHashtag(tag, config);
+    const runtimeConfig = getInstagramRuntimeConfig({ store, config });
+    const discovery = await discoverProfilesByHashtag(tag, runtimeConfig);
 
     if (!discovery.usernames.length) {
       store.completeShard(
@@ -109,7 +111,8 @@ function createWorker({ store, config }) {
 
   async function processProfileShard(job, shard) {
     const username = shard.payload?.username || shard.shardKey;
-    const profile = await fetchProfileInfo(username, config);
+    const runtimeConfig = getInstagramRuntimeConfig({ store, config });
+    const profile = await fetchProfileInfo(username, runtimeConfig);
     const classified = classifyHospitalityLead({
       profile,
       countryInput: job.country,

@@ -247,7 +247,7 @@
           <div class="header-row">
             <div>
               <h1>Instagram hospitality scraper</h1>
-              <p class="subtle">Run country-targeted hashtag discovery jobs, inspect profile extraction, and export narrow hospitality leads.</p>
+              <p class="subtle">Run country-targeted discovery jobs, inspect profile extraction, and export narrow hospitality leads.</p>
             </div>
             <div>
               <div id="auth-username" class="subtle"></div>
@@ -261,15 +261,28 @@
           <form id="create-job-form">
             <input id="country" name="country" placeholder="Country, e.g. United States or GB" required>
             <input id="keyword" name="keyword" placeholder="Hospitality type, e.g. restaurants or hotels" required>
-            <textarea id="hashtags" name="hashtags" rows="3" placeholder="hashtags, comma separated. Example: restaurants, dining, food"></textarea>
             <select id="mode" name="mode">
               <option value="discovery" selected>Discovery mode</option>
               <option value="safe">Safe mode</option>
             </select>
-            <div class="subtle">Hashtag discovery requires <code>IG_SESSION_ID</code>. Profile extraction itself is public and uses Instagram's web profile JSON.</div>
+            <textarea id="hashtags" name="hashtags" rows="3" placeholder="hashtags, comma separated. Example: restaurants, dining, food"></textarea>
+            <textarea id="usernames" name="usernames" rows="4" placeholder="Instagram usernames or profile URLs, one per line. Example: noburestaurants or https://www.instagram.com/chipotle/"></textarea>
+            <div id="mode-help" class="subtle">Discovery mode uses hashtags and needs an Instagram session. Safe mode skips hashtag discovery and extracts public profile data from the usernames/profile URLs you provide.</div>
             <button type="submit">Start scrape job</button>
           </form>
           <div id="create-job-message" class="message"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Instagram settings</h2>
+          <form id="instagram-form" class="stack">
+            <input id="instagram-session-id" name="sessionId" type="password" placeholder="IG_SESSION_ID for hashtag discovery">
+            <input id="instagram-proxy-url" name="proxyUrl" placeholder="Optional proxy URL, e.g. http://user:pass@host:port">
+            <label class="inline-option"><input id="instagram-clear-session" type="checkbox"> Clear saved Instagram session</label>
+            <div class="subtle">Hashtag discovery needs a logged-in Instagram session cookie. Public profile extraction works without it.</div>
+            <button type="submit">Save Instagram settings</button>
+          </form>
+          <div id="instagram-message" class="message"></div>
         </div>
 
         <div class="panel">
@@ -412,6 +425,8 @@
         refreshTimer: null,
         nocodbConfig: null,
         nocodbDirty: false,
+        instagramConfig: null,
+        instagramDirty: false,
       };
 
       const els = {
@@ -419,6 +434,7 @@
         logoutButton: document.getElementById("logout-button"),
         createJobForm: document.getElementById("create-job-form"),
         createJobMessage: document.getElementById("create-job-message"),
+        modeHelp: document.getElementById("mode-help"),
         nocodbForm: document.getElementById("nocodb-form"),
         nocodbBaseUrl: document.getElementById("nocodb-base-url"),
         nocodbApiToken: document.getElementById("nocodb-api-token"),
@@ -429,6 +445,11 @@
         nocodbAutoCreateColumns: document.getElementById("nocodb-auto-create-columns"),
         nocodbTestButton: document.getElementById("nocodb-test-button"),
         nocodbMessage: document.getElementById("nocodb-message"),
+        instagramForm: document.getElementById("instagram-form"),
+        instagramSessionId: document.getElementById("instagram-session-id"),
+        instagramProxyUrl: document.getElementById("instagram-proxy-url"),
+        instagramClearSession: document.getElementById("instagram-clear-session"),
+        instagramMessage: document.getElementById("instagram-message"),
         jobList: document.getElementById("job-list"),
         refreshJobs: document.getElementById("refresh-jobs"),
         selectedJobEmpty: document.getElementById("selected-job-empty"),
@@ -544,6 +565,10 @@
         state.nocodbDirty = Boolean(isDirty);
       }
 
+      function setInstagramDirty(isDirty) {
+        state.instagramDirty = Boolean(isDirty);
+      }
+
       async function loadNocoDbConfig(options = {}) {
         const payload = await requestJson("/integrations/nocodb");
         state.nocodbConfig = payload;
@@ -561,6 +586,43 @@
         els.nocodbAutoSync.checked = Boolean(payload.autoSyncOnCompletion);
         els.nocodbAutoCreateColumns.checked = payload.autoCreateColumns !== false;
         setNocoDbDirty(false);
+      }
+
+      async function loadInstagramConfig(options = {}) {
+        const payload = await requestJson("/integrations/instagram");
+        state.instagramConfig = payload;
+        if (state.instagramDirty && !options.force) {
+          return;
+        }
+        els.instagramSessionId.value = "";
+        els.instagramSessionId.placeholder = payload.hasSessionId
+          ? `Session saved (${payload.sessionIdPreview}). Leave blank to keep it.`
+          : "IG_SESSION_ID for hashtag discovery";
+        els.instagramProxyUrl.value = payload.proxyUrl || "";
+        els.instagramClearSession.checked = false;
+        setInstagramDirty(false);
+      }
+
+      function syncModeUi() {
+        const mode = document.getElementById("mode").value;
+        const hashtags = document.getElementById("hashtags");
+        const usernames = document.getElementById("usernames");
+
+        if (mode === "safe") {
+          hashtags.disabled = true;
+          hashtags.placeholder = "Safe mode does not use hashtags.";
+          usernames.disabled = false;
+          usernames.placeholder = "Instagram usernames or profile URLs, one per line.";
+          els.modeHelp.textContent =
+            "Safe mode extracts public profile data directly from the usernames/profile URLs you enter. No Instagram session is required.";
+        } else {
+          hashtags.disabled = false;
+          hashtags.placeholder = "hashtags, comma separated. Example: restaurants, dining, food";
+          usernames.disabled = false;
+          usernames.placeholder = "Optional seed usernames/profile URLs. Discovery mode will still rely on hashtags.";
+          els.modeHelp.textContent =
+            "Discovery mode uses hashtags and needs an Instagram session. Public profile extraction itself is still public.";
+        }
       }
 
       function nocodbPayloadFromForm(includeToken) {
@@ -581,6 +643,14 @@
         }
 
         return payload;
+      }
+
+      function instagramPayloadFromForm() {
+        return {
+          sessionId: els.instagramSessionId.value.trim(),
+          proxyUrl: els.instagramProxyUrl.value.trim(),
+          clearSessionId: els.instagramClearSession.checked,
+        };
       }
 
       function renderStats(job, stats, links, syncStatus) {
@@ -743,6 +813,7 @@
       async function fullRefresh() {
         try {
           await loadSession();
+          await loadInstagramConfig();
           await loadNocoDbConfig();
           await loadJobs();
           await refreshSelectedJob();
@@ -763,6 +834,7 @@
               country: document.getElementById("country").value,
               keyword: document.getElementById("keyword").value,
               hashtags: document.getElementById("hashtags").value,
+              usernames: document.getElementById("usernames").value,
               mode: document.getElementById("mode").value,
             }),
           });
@@ -773,10 +845,35 @@
           document.getElementById("country").value = "";
           document.getElementById("keyword").value = "";
           document.getElementById("hashtags").value = "";
+          document.getElementById("usernames").value = "";
           document.getElementById("mode").value = "discovery";
+          syncModeUi();
           await fullRefresh();
         } catch (error) {
           setMessage(els.createJobMessage, error.message, true);
+        }
+      });
+
+      els.instagramForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setMessage(els.instagramMessage, "Saving Instagram settings...");
+
+        try {
+          const payload = await requestJson("/integrations/instagram", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(instagramPayloadFromForm()),
+          });
+          state.instagramConfig = payload;
+          await loadInstagramConfig({ force: true });
+          setMessage(
+            els.instagramMessage,
+            payload.hasSessionId
+              ? `Instagram session saved (${payload.sessionIdPreview}).`
+              : "Instagram settings saved."
+          );
+        } catch (error) {
+          setMessage(els.instagramMessage, error.message, true);
         }
       });
 
@@ -825,6 +922,15 @@
           setNocoDbDirty(true);
         });
       }
+
+      for (const field of els.instagramForm.querySelectorAll("input")) {
+        const eventName = field.type === "checkbox" ? "change" : "input";
+        field.addEventListener(eventName, () => {
+          setInstagramDirty(true);
+        });
+      }
+
+      document.getElementById("mode").addEventListener("change", syncModeUi);
 
       els.refreshJobs.addEventListener("click", () => {
         fullRefresh().catch((error) => {
@@ -932,6 +1038,7 @@
         window.location.href = `/login?next=${next}`;
       });
 
+      syncModeUi();
       fullRefresh();
       state.refreshTimer = window.setInterval(() => {
         fullRefresh().catch(() => {});

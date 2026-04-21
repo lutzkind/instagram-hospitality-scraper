@@ -1,8 +1,12 @@
 const express = require("express");
 const path = require("path");
-const { resolveSearchParams } = require("./keywords");
+const { parseProfileTargets, resolveSearchParams } = require("./keywords");
 const { createJobId } = require("./worker");
 const { createAuth } = require("./auth");
+const {
+  getInstagramRuntimeConfig,
+  getInstagramRuntimeConfigSummary,
+} = require("./runtime-config");
 
 function createApp({ store, config, nocoDb }) {
   const app = express();
@@ -12,9 +16,10 @@ function createApp({ store, config, nocoDb }) {
   app.use("/assets", express.static(path.join(__dirname, "..", "public")));
 
   app.get("/health", (_req, res) => {
+    const runtimeConfig = getInstagramRuntimeConfig({ store, config });
     res.json({
       ok: true,
-      requiresSessionForDiscovery: !Boolean(config.igSessionId),
+      requiresSessionForDiscovery: !Boolean(runtimeConfig.igSessionId),
       publicProfileExtraction: true,
     });
   });
@@ -57,6 +62,32 @@ function createApp({ store, config, nocoDb }) {
     }
   });
 
+  app.get("/integrations/instagram", withAuth(auth), (_req, res) => {
+    res.json(getInstagramRuntimeConfigSummary({ store, config }));
+  });
+
+  app.put("/integrations/instagram", withAuth(auth), (req, res) => {
+    const current = getInstagramRuntimeConfig({ store, config });
+    const next = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "sessionId")) {
+      const sessionId = String(req.body.sessionId || "").trim();
+      next.igSessionId = sessionId || current.igSessionId || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "clearSessionId")) {
+      if (req.body.clearSessionId) next.igSessionId = null;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "proxyUrl")) {
+      next.igProxyUrl = String(req.body.proxyUrl || "").trim() || null;
+    }
+
+    store.saveInstagramRuntimeConfig(next, {
+      igSessionId: config.igSessionId,
+      igProxyUrl: config.igProxyUrl,
+    });
+    res.json(getInstagramRuntimeConfigSummary({ store, config }));
+  });
+
   app.use("/jobs", withAuth(auth));
 
   app.get("/jobs", (_req, res) => res.json({ jobs: store.listJobs() }));
@@ -69,11 +100,17 @@ function createApp({ store, config, nocoDb }) {
       keyword,
       hashtags: req.body.hashtags,
     });
+    const usernames = parseProfileTargets(req.body.usernames);
 
     if (!country || !keyword) {
       return res.status(400).json({ error: "country and keyword are required." });
     }
-    if (!hashtags.length) {
+    if (mode === "safe" && !usernames.length) {
+      return res.status(400).json({
+        error: "Safe mode requires at least one Instagram username or profile URL.",
+      });
+    }
+    if (mode !== "safe" && !hashtags.length) {
       return res.status(400).json({ error: "At least one hashtag is required." });
     }
 
@@ -82,7 +119,8 @@ function createApp({ store, config, nocoDb }) {
       id,
       country,
       keyword,
-      hashtags,
+      hashtags: mode === "safe" ? [] : hashtags,
+      usernames,
       mode,
     });
 

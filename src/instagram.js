@@ -1,5 +1,8 @@
+const { execFile } = require("child_process");
+const { promisify } = require("util");
 const { chromium } = require("playwright-core");
 
+const execFileAsync = promisify(execFile);
 let browserPromise = null;
 
 async function fetchProfileInfo(username, config) {
@@ -7,12 +10,10 @@ async function fetchProfileInfo(username, config) {
   let lastStatus = null;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const response = await fetch(url, {
-      headers: buildApiHeaders(config, null),
-    });
+    const response = await curlJson(url, buildApiHeaders(config, null), config);
 
     if (response.ok) {
-      const payload = await response.json();
+      const payload = response.json;
       const user = payload?.data?.user;
       if (!user?.username) {
         throw new Error(`Profile lookup returned no user for ${username}.`);
@@ -90,15 +91,17 @@ async function tryDiscoverFromTagApi(hashtag, config) {
     hashtag
   )}`;
 
-  const response = await fetch(url, {
-    headers: buildApiHeaders(config, config.igSessionId),
-  });
+  const response = await curlJson(
+    url,
+    buildApiHeaders(config, config.igSessionId),
+    config
+  );
 
   if (!response.ok) {
     return [];
   }
 
-  const payload = await response.json().catch(() => null);
+  const payload = response.json;
   if (!payload) return [];
 
   return [...collectUsernames(payload)];
@@ -212,14 +215,59 @@ function collectUsernames(value, target = new Set()) {
 function buildApiHeaders(config, sessionId) {
   const headers = {
     "x-ig-app-id": config.igAppId,
+    "x-asbd-id": "129477",
     "user-agent": config.igUserAgent,
     accept: "*/*",
+    "accept-language": "en-US,en;q=0.9",
     referer: `${config.igBaseUrl}/`,
   };
   if (sessionId) {
     headers.cookie = `sessionid=${sessionId}`;
   }
   return headers;
+}
+
+async function curlJson(url, headers, config) {
+  const args = [
+    "--silent",
+    "--show-error",
+    "--location",
+    "--compressed",
+    "--write-out",
+    "\\n%{http_code}",
+    url,
+  ];
+
+  if (config.igProxyUrl) {
+    args.unshift(config.igProxyUrl);
+    args.unshift("--proxy");
+  }
+
+  for (const [name, value] of Object.entries(headers || {})) {
+    if (value == null || value === "") continue;
+    args.unshift(`${name}: ${value}`);
+    args.unshift("--header");
+  }
+
+  const { stdout } = await execFileAsync("curl", args, {
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  const separator = stdout.lastIndexOf("\n");
+  const body = separator >= 0 ? stdout.slice(0, separator) : stdout;
+  const statusText = separator >= 0 ? stdout.slice(separator + 1).trim() : "";
+  const status = Number.parseInt(statusText, 10) || 0;
+  let json = null;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    json = null;
+  }
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    body,
+    json,
+  };
 }
 
 async function getBrowser(config) {
