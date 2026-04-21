@@ -1,0 +1,23 @@
+{
+  "name": "instagram-hospitality-scraper",
+  "version": "1.0.0",
+  "description": "Autonomous Instagram hospitality lead scraper with hashtag discovery, profile extraction, dashboard, and exports.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "instagram",
+    "hospitality",
+    "restaurants",
+    "hotels",
+    "scraper"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "express": "^5.2.1",
+    "playwright-core": "^1.52.0"
+  }
+}
