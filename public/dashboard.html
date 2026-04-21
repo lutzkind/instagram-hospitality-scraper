@@ -654,19 +654,23 @@
       }
 
       function renderStats(job, stats, links, syncStatus) {
+        const totalShards = Number(stats?.totalShards || 0);
+        const completedShards = Number(stats?.completedShards || 0);
+        const failedShards = Number(stats?.failedShards || 0);
+        const unfinishedShards = Number(stats?.unfinishedShards || 0);
+        const completionRatio = totalShards
+          ? Math.round(((completedShards + failedShards) / totalShards) * 100)
+          : 0;
         const cards = [
           ["Leads", formatNumber(job.leadCount)],
-          ["Known shard completion", `${stats.progress.knownShardCompletionRatio}%`],
-          ["Running shards", formatNumber(stats.statusCounts.running)],
-          ["Paused shards", formatNumber(stats.statusCounts.paused)],
-          ["Pending/retry shards", formatNumber(stats.statusCounts.pending + stats.statusCounts.retry)],
-          ["Failed shards", formatNumber(stats.statusCounts.failed)],
-          ["Max split depth", formatNumber(stats.depth.maxDepth)],
-          ["Leads with website", formatNumber(stats.leadCoverage.leadsWithWebsite)],
-          ["Leads with phone", formatNumber(stats.leadCoverage.leadsWithPhone)],
-          ["Leads/hour", stats.throughput.leadsPerHour == null ? "-" : formatNumber(stats.throughput.leadsPerHour)],
-          ["Completed shards/hour", stats.throughput.completedShardsPerHour == null ? "-" : formatNumber(stats.throughput.completedShardsPerHour)],
-          ["Last activity", formatDate(stats.recentActivity.lastActivityAt)],
+          ["Shard completion", `${completionRatio}%`],
+          ["Total shards", formatNumber(totalShards)],
+          ["Completed shards", formatNumber(completedShards)],
+          ["Failed shards", formatNumber(failedShards)],
+          ["Unfinished shards", formatNumber(unfinishedShards)],
+          ["Mode", job.mode || "-"],
+          ["Hashtags", formatNumber((job.hashtags || []).length)],
+          ["Lead artifacts", job.artifactCsvPath || job.artifactJsonPath ? "ready" : "pending"],
         ];
 
         els.statsGrid.innerHTML = cards.map(([label, value]) => `
