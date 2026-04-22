@@ -19,6 +19,21 @@ function getInstagramRuntimeConfigSummary({ store, config }) {
       ? `${runtime.igSessionId.slice(0, 6)}...${runtime.igSessionId.slice(-4)}`
       : null,
     proxyUrl: runtime.igProxyUrl || "",
+    safety: {
+      requestDelayMs: [runtime.igRequestDelayMinMs, runtime.igRequestDelayMaxMs],
+      browserWarmupMs: [runtime.igBrowserWarmupMinMs, runtime.igBrowserWarmupMaxMs],
+      hashtagCooldownMs: [
+        runtime.igHashtagCooldownMinMs,
+        runtime.igHashtagCooldownMaxMs,
+      ],
+      profileOpenDelayMs: [
+        runtime.igProfileOpenDelayMinMs,
+        runtime.igProfileOpenDelayMaxMs,
+      ],
+      maxProfilesPerHashtag: runtime.igDiscoveryMaxProfilesPerHashtag,
+      maxProfilesPerJob: runtime.igDiscoveryMaxProfilesPerJob,
+      frictionRetryDelayMs: runtime.igFrictionRetryDelayMs,
+    },
   };
 }
 

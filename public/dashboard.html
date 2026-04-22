@@ -280,6 +280,7 @@
             <input id="instagram-proxy-url" name="proxyUrl" placeholder="Optional proxy URL, e.g. http://user:pass@host:port">
             <label class="inline-option"><input id="instagram-clear-session" type="checkbox"> Clear saved Instagram session</label>
             <div class="subtle">Hashtag discovery needs a logged-in Instagram session cookie. Public profile extraction works without it.</div>
+            <div id="instagram-safety-summary" class="subtle"></div>
             <button type="submit">Save Instagram settings</button>
           </form>
           <div id="instagram-message" class="message"></div>
@@ -449,6 +450,7 @@
         instagramSessionId: document.getElementById("instagram-session-id"),
         instagramProxyUrl: document.getElementById("instagram-proxy-url"),
         instagramClearSession: document.getElementById("instagram-clear-session"),
+        instagramSafetySummary: document.getElementById("instagram-safety-summary"),
         instagramMessage: document.getElementById("instagram-message"),
         jobList: document.getElementById("job-list"),
         refreshJobs: document.getElementById("refresh-jobs"),
@@ -600,7 +602,26 @@
           : "IG_SESSION_ID for hashtag discovery";
         els.instagramProxyUrl.value = payload.proxyUrl || "";
         els.instagramClearSession.checked = false;
+        els.instagramSafetySummary.textContent = formatInstagramSafetySummary(payload.safety);
         setInstagramDirty(false);
+      }
+
+      function formatInstagramSafetySummary(safety) {
+        if (!safety) return "";
+        const requestDelay = Array.isArray(safety.requestDelayMs)
+          ? `${Math.round(safety.requestDelayMs[0] / 1000)}-${Math.round(safety.requestDelayMs[1] / 1000)}s`
+          : "-";
+        const hashtagCooldown = Array.isArray(safety.hashtagCooldownMs)
+          ? `${Math.round(safety.hashtagCooldownMs[0] / 1000)}-${Math.round(safety.hashtagCooldownMs[1] / 1000)}s`
+          : "-";
+        const postDelay = Array.isArray(safety.profileOpenDelayMs)
+          ? `${Math.round(safety.profileOpenDelayMs[0] / 1000)}-${Math.round(safety.profileOpenDelayMs[1] / 1000)}s`
+          : "-";
+        const frictionPause = safety.frictionRetryDelayMs
+          ? `${Math.round(safety.frictionRetryDelayMs / 60000)} min`
+          : "-";
+
+        return `Discovery safety: request delay ${requestDelay}, hashtag cooldown ${hashtagCooldown}, post dwell ${postDelay}, max ${safety.maxProfilesPerHashtag} profiles per hashtag, max ${safety.maxProfilesPerJob} queued profiles per job, automatic pause on friction for ${frictionPause}.`;
       }
 
       function syncModeUi() {

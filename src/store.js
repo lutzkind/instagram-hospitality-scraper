@@ -388,6 +388,63 @@ function createStore(config) {
       });
     },
 
+    countProfileShards(jobId) {
+      return (
+        db
+          .prepare(
+            `
+              SELECT COUNT(*) AS total
+              FROM shards
+              WHERE job_id = ?
+                AND shard_type = 'profile'
+            `
+          )
+          .get(jobId)?.total || 0
+      );
+    },
+
+    deferPendingHashtagShards(jobId, delayMs, excludeShardId = null) {
+      if (!delayMs || delayMs < 1) return 0;
+
+      const nextRunAt = new Date(Date.now() + delayMs).toISOString();
+      const timestamp = nowIso();
+
+      if (excludeShardId != null) {
+        return db
+          .prepare(
+            `
+              UPDATE shards
+              SET next_run_at = CASE
+                WHEN next_run_at < @nextRunAt THEN @nextRunAt
+                ELSE next_run_at
+              END,
+                  updated_at = @timestamp
+              WHERE job_id = @jobId
+                AND shard_type = 'hashtag'
+                AND status IN ('pending', 'retry')
+                AND id != @excludeShardId
+            `
+          )
+          .run({ jobId, nextRunAt, timestamp, excludeShardId }).changes;
+      }
+
+      return db
+        .prepare(
+          `
+            UPDATE shards
+            SET next_run_at = CASE
+              WHEN next_run_at < @nextRunAt THEN @nextRunAt
+              ELSE next_run_at
+            END,
+                updated_at = @timestamp
+            WHERE job_id = @jobId
+              AND shard_type = 'hashtag'
+              AND status IN ('pending', 'retry')
+          `
+        )
+        .run({ jobId, nextRunAt, timestamp }).changes;
+    },
+
     upsertLead(jobId, lead) {
       const timestamp = nowIso();
       db.prepare(
@@ -536,16 +593,16 @@ function createStore(config) {
         .map(deserializeShardRow);
     },
 
-    pauseJob(jobId) {
+    pauseJob(jobId, message = "Paused") {
       db.prepare(
         `
           UPDATE jobs
           SET status = 'paused',
-              message = 'Paused',
+              message = @message,
               updated_at = @timestamp
           WHERE id = @jobId
         `
-      ).run({ jobId, timestamp: nowIso() });
+      ).run({ jobId, message, timestamp: nowIso() });
       return this.getJob(jobId);
     },
 

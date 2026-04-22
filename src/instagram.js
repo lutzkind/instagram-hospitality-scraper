@@ -5,11 +5,23 @@ const { chromium } = require("playwright-core");
 const execFileAsync = promisify(execFile);
 let browserPromise = null;
 
+class InstagramFrictionError extends Error {
+  constructor(message, options = {}) {
+    super(message);
+    this.name = "InstagramFrictionError";
+    this.code = options.code || "instagram_friction";
+    this.status = options.status || null;
+    this.cooldownMs = options.cooldownMs || null;
+    this.pauseJob = options.pauseJob !== false;
+  }
+}
+
 async function fetchProfileInfo(username, config) {
   const url = `${config.igBaseUrl}/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
   let lastStatus = null;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    await waitRandom(config.igRequestDelayMinMs, config.igRequestDelayMaxMs);
     const response = await curlJson(url, buildApiHeaders(config, null), config);
 
     if (response.ok) {
@@ -47,11 +59,19 @@ async function fetchProfileInfo(username, config) {
     }
 
     lastStatus = response.status;
+    const frictionError = detectFrictionFromHttpResponse(response, config, {
+      defaultMessage: `Instagram profile lookup is throttled for ${username}.`,
+    });
+    if (frictionError) throw frictionError;
+
     if (response.status !== 429) {
       break;
     }
 
-    await delay(config.igRequestDelayMs * (attempt + 1));
+    await waitRandom(
+      config.igRequestDelayMinMs * (attempt + 1),
+      config.igRequestDelayMaxMs * (attempt + 1)
+    );
   }
 
   throw new Error(
@@ -68,11 +88,12 @@ async function discoverProfilesByHashtag(hashtag, config) {
     };
   }
 
+  await waitRandom(config.igRequestDelayMinMs, config.igRequestDelayMaxMs);
   const apiUsernames = await tryDiscoverFromTagApi(hashtag, config);
   if (apiUsernames.length > 0) {
     return {
       usernames: apiUsernames.slice(0, config.igDiscoveryMaxProfilesPerHashtag),
-      message: `Discovered via tag API.`,
+      message: "Discovered via tag API.",
     };
   }
 
@@ -98,6 +119,10 @@ async function tryDiscoverFromTagApi(hashtag, config) {
   );
 
   if (!response.ok) {
+    const frictionError = detectFrictionFromHttpResponse(response, config, {
+      defaultMessage: `Instagram is throttling hashtag discovery for #${hashtag}.`,
+    });
+    if (frictionError) throw frictionError;
     return [];
   }
 
@@ -134,13 +159,25 @@ async function discoverViaBrowser(hashtag, config) {
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
+    await waitRandom(config.igBrowserWarmupMinMs, config.igBrowserWarmupMaxMs);
+    await assertBrowserPageLooksHealthy(page, config, {
+      hashtag,
+      stage: "opening hashtag page",
+    });
 
     for (let index = 0; index < config.igDiscoveryScrollSteps; index += 1) {
-      await page.waitForTimeout(config.igRequestDelayMs);
-      const postLinks = await page.evaluate(() =>
-        Array.from(document.querySelectorAll("a[href*='/p/'], a[href*='/reel/']"))
-          .map((anchor) => anchor.href)
-          .filter(Boolean)
+      await waitRandom(config.igRequestDelayMinMs, config.igRequestDelayMaxMs);
+      await assertBrowserPageLooksHealthy(page, config, {
+        hashtag,
+        stage: `reading hashtag page ${index + 1}`,
+      });
+
+      const postLinks = shuffle(
+        await page.evaluate(() =>
+          Array.from(document.querySelectorAll("a[href*='/p/'], a[href*='/reel/']"))
+            .map((anchor) => anchor.href)
+            .filter(Boolean)
+        )
       );
 
       for (const link of postLinks.slice(0, config.igDiscoveryPostSampleLimit)) {
@@ -164,7 +201,15 @@ async function extractUsernameFromPost(context, link, config) {
   const page = await context.newPage();
   try {
     await page.goto(link, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(config.igRequestDelayMs);
+    await waitRandom(
+      config.igProfileOpenDelayMinMs,
+      config.igProfileOpenDelayMaxMs
+    );
+    await assertBrowserPageLooksHealthy(page, config, {
+      stage: "opening post",
+      link,
+    });
+
     const href = await page.evaluate(() => {
       const anchors = Array.from(document.querySelectorAll("a[href]"));
       for (const anchor of anchors) {
@@ -181,7 +226,10 @@ async function extractUsernameFromPost(context, link, config) {
     });
 
     return href ? href.replace(/\//g, "") : null;
-  } catch (_error) {
+  } catch (error) {
+    if (error instanceof InstagramFrictionError) {
+      throw error;
+    }
     return null;
   } finally {
     await page.close();
@@ -298,11 +346,138 @@ function parseProxy(proxyUrl) {
   };
 }
 
+async function waitRandom(minMs, maxMs) {
+  await delay(randomBetween(minMs, maxMs));
+}
+
+function randomBetween(minMs, maxMs) {
+  const min = Math.max(Number(minMs) || 0, 0);
+  const max = Math.max(Number(maxMs) || min, min);
+  if (max <= min) return min;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function shuffle(items) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
+async function assertBrowserPageLooksHealthy(page, config, context = {}) {
+  const bodyText = await page.evaluate(() =>
+    document.body?.innerText?.slice(0, 4000) || ""
+  );
+  const currentUrl = page.url();
+  const frictionError = detectFrictionFromText(bodyText, config, {
+    currentUrl,
+    defaultMessage: buildBrowserFrictionMessage(context),
+  });
+  if (frictionError) {
+    throw frictionError;
+  }
+}
+
+function detectFrictionFromHttpResponse(response, config, options = {}) {
+  if (!response) return null;
+
+  const combined = [response.body, JSON.stringify(response.json || {})]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+
+  if (response.status === 429) {
+    return new InstagramFrictionError(
+      options.defaultMessage || "Instagram returned HTTP 429.",
+      {
+        code: "rate_limited",
+        status: response.status,
+        cooldownMs: config.igFrictionRetryDelayMs,
+      }
+    );
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    return new InstagramFrictionError(
+      options.defaultMessage || "Instagram rejected the current session.",
+      {
+        code: "auth_friction",
+        status: response.status,
+        cooldownMs: config.igFrictionRetryDelayMs,
+      }
+    );
+  }
+
+  if (
+    combined.includes("challenge_required") ||
+    combined.includes("checkpoint_required") ||
+    combined.includes("feedback_required") ||
+    combined.includes("login_required") ||
+    combined.includes("please wait a few minutes")
+  ) {
+    return new InstagramFrictionError(
+      options.defaultMessage || "Instagram returned a friction response.",
+      {
+        code: "challenge_required",
+        status: response.status,
+        cooldownMs: config.igFrictionRetryDelayMs,
+      }
+    );
+  }
+
+  return null;
+}
+
+function detectFrictionFromText(text, config, options = {}) {
+  const combined = String(text || "").toLowerCase();
+  const currentUrl = String(options.currentUrl || "").toLowerCase();
+  const frictionSignals = [
+    "please wait a few minutes",
+    "challenge_required",
+    "checkpoint_required",
+    "feedback_required",
+    "try again later",
+    "suspicious activity",
+    "confirm it's you",
+    "we restrict certain activity",
+    "login_required",
+  ];
+
+  if (
+    frictionSignals.some((signal) => combined.includes(signal)) ||
+    currentUrl.includes("/challenge/") ||
+    currentUrl.includes("/accounts/login")
+  ) {
+    return new InstagramFrictionError(
+      options.defaultMessage || "Instagram showed a challenge or throttling page.",
+      {
+        code: "browser_challenge",
+        cooldownMs: config.igFrictionRetryDelayMs,
+      }
+    );
+  }
+
+  return null;
+}
+
+function buildBrowserFrictionMessage(context = {}) {
+  if (context.hashtag) {
+    return `Instagram showed friction while ${context.stage || "browsing"} #${context.hashtag}.`;
+  }
+  if (context.link) {
+    return `Instagram showed friction while ${context.stage || "opening"} ${context.link}.`;
+  }
+  return "Instagram showed a friction page during discovery.";
+}
+
 module.exports = {
+  InstagramFrictionError,
   closeBrowser,
   discoverProfilesByHashtag,
   fetchProfileInfo,

@@ -19,6 +19,15 @@ function boolFromEnv(name, fallback) {
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const port = intFromEnv("PORT", 3000);
 const workerPollMs = intFromEnv("WORKER_POLL_MS", 4000);
+const igRequestDelayMs = intFromEnv("IG_REQUEST_DELAY_MS", 2500);
+const igRequestDelayMinMs = intFromEnv(
+  "IG_REQUEST_DELAY_MIN_MS",
+  Math.max(igRequestDelayMs, 4000)
+);
+const igRequestDelayMaxMs = intFromEnv(
+  "IG_REQUEST_DELAY_MAX_MS",
+  Math.max(igRequestDelayMinMs + 1000, 9000)
+);
 
 module.exports = {
   host: process.env.HOST || "0.0.0.0",
@@ -49,13 +58,29 @@ module.exports = {
   igSessionId: process.env.IG_SESSION_ID || null,
   igProxyUrl: process.env.IG_PROXY_URL || null,
   igHeadless: boolFromEnv("IG_HEADLESS", true),
-  igRequestDelayMs: intFromEnv("IG_REQUEST_DELAY_MS", 2500),
+  igRequestDelayMs,
+  igRequestDelayMinMs,
+  igRequestDelayMaxMs,
+  igBrowserWarmupMinMs: intFromEnv("IG_BROWSER_WARMUP_MIN_MS", 8000),
+  igBrowserWarmupMaxMs: intFromEnv("IG_BROWSER_WARMUP_MAX_MS", 18000),
+  igHashtagCooldownMinMs: intFromEnv("IG_HASHTAG_COOLDOWN_MIN_MS", 45000),
+  igHashtagCooldownMaxMs: intFromEnv("IG_HASHTAG_COOLDOWN_MAX_MS", 120000),
+  igProfileOpenDelayMinMs: intFromEnv("IG_PROFILE_OPEN_DELAY_MIN_MS", 3000),
+  igProfileOpenDelayMaxMs: intFromEnv("IG_PROFILE_OPEN_DELAY_MAX_MS", 7000),
   igDiscoveryMaxProfilesPerHashtag: intFromEnv(
     "IG_DISCOVERY_MAX_PROFILES_PER_HASHTAG",
     50
   ),
+  igDiscoveryMaxProfilesPerJob: intFromEnv(
+    "IG_DISCOVERY_MAX_PROFILES_PER_JOB",
+    150
+  ),
   igDiscoveryScrollSteps: intFromEnv("IG_DISCOVERY_SCROLL_STEPS", 4),
   igDiscoveryPostSampleLimit: intFromEnv("IG_DISCOVERY_POST_SAMPLE_LIMIT", 24),
+  igFrictionRetryDelayMs: intFromEnv(
+    "IG_FRICTION_RETRY_DELAY_MS",
+    15 * 60 * 1000
+  ),
   chromiumPath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
   nocoDb: {
     baseUrl: process.env.NOCODB_BASE_URL || null,

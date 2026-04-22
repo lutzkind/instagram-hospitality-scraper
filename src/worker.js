@@ -3,6 +3,7 @@ const { exportJobArtifacts } = require("./exporters");
 const {
   discoverProfilesByHashtag,
   fetchProfileInfo,
+  InstagramFrictionError,
 } = require("./instagram");
 const { classifyHospitalityLead } = require("./classifier");
 const { getInstagramRuntimeConfig } = require("./runtime-config");
@@ -66,6 +67,20 @@ function createWorker({ store, config }) {
         throw new Error(`Unsupported shard type: ${shard.shardType}`);
       }
     } catch (error) {
+      if (error instanceof InstagramFrictionError) {
+        const delay = error.cooldownMs || config.igFrictionRetryDelayMs;
+        store.retryShard(shard.id, error.message, delay, shard.runToken);
+        if (job.mode === "discovery" && error.pauseJob !== false) {
+          store.pauseJob(
+            job.id,
+            `${error.message} Job paused after an Instagram friction signal. Wait before resuming.`
+          );
+        }
+        store.refreshJobStats(job.id);
+        finalizeEligibleJobs();
+        return;
+      }
+
       const attemptCount = (shard.attemptCount || 0) + 1;
       if (attemptCount < config.retryLimit) {
         const delay = config.retryBaseDelayMs * attemptCount;
@@ -83,29 +98,50 @@ function createWorker({ store, config }) {
     const tag = shard.payload?.hashtag || shard.shardKey;
     const runtimeConfig = getInstagramRuntimeConfig({ store, config });
     const discovery = await discoverProfilesByHashtag(tag, runtimeConfig);
+    const existingProfileShardCount = store.countProfileShards(job.id);
+    const remainingCapacity = Math.max(
+      runtimeConfig.igDiscoveryMaxProfilesPerJob - existingProfileShardCount,
+      0
+    );
 
-    if (!discovery.usernames.length) {
+    if (!discovery.usernames.length || remainingCapacity === 0) {
+      const cooldownMs = randomBetween(
+        runtimeConfig.igHashtagCooldownMinMs,
+        runtimeConfig.igHashtagCooldownMaxMs
+      );
+      store.deferPendingHashtagShards(job.id, cooldownMs, shard.id);
       store.completeShard(
         shard.id,
         0,
         shard.runToken,
-        discovery.message || "No profiles discovered."
+        remainingCapacity === 0
+          ? `Skipped #${tag} because the job already reached the profile cap (${runtimeConfig.igDiscoveryMaxProfilesPerJob}).`
+          : discovery.message || "No profiles discovered."
       );
       return;
     }
 
-    for (const username of discovery.usernames) {
+    const usernamesToQueue = discovery.usernames.slice(0, remainingCapacity);
+    for (const username of usernamesToQueue) {
       store.createProfileShard(job.id, username, {
         username,
         discoveredFromHashtag: tag,
       });
     }
 
+    const cooldownMs = randomBetween(
+      runtimeConfig.igHashtagCooldownMinMs,
+      runtimeConfig.igHashtagCooldownMaxMs
+    );
+    store.deferPendingHashtagShards(job.id, cooldownMs, shard.id);
+
     store.completeShard(
       shard.id,
-      discovery.usernames.length,
+      usernamesToQueue.length,
       shard.runToken,
-      `Discovered ${discovery.usernames.length} profiles from #${tag}.`
+      usernamesToQueue.length < discovery.usernames.length
+        ? `Discovered ${discovery.usernames.length} profiles from #${tag}, queued ${usernamesToQueue.length} before hitting the job cap.`
+        : `Discovered ${usernamesToQueue.length} profiles from #${tag}.`
     );
   }
 
@@ -154,6 +190,13 @@ function createWorker({ store, config }) {
 
 function createJobId() {
   return crypto.randomUUID();
+}
+
+function randomBetween(minMs, maxMs) {
+  const min = Math.max(Number(minMs) || 0, 0);
+  const max = Math.max(Number(maxMs) || min, min);
+  if (max <= min) return min;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 module.exports = { createWorker, createJobId };
