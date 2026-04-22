@@ -89,12 +89,26 @@ async function discoverProfilesByHashtag(hashtag, config) {
   }
 
   await waitRandom(config.igRequestDelayMinMs, config.igRequestDelayMaxMs);
-  const apiUsernames = await tryDiscoverFromTagApi(hashtag, config);
-  if (apiUsernames.length > 0) {
-    return {
-      usernames: apiUsernames.slice(0, config.igDiscoveryMaxProfilesPerHashtag),
-      message: "Discovered via tag API.",
-    };
+  let apiFallbackReason = null;
+  try {
+    const apiUsernames = await tryDiscoverFromTagApi(hashtag, config);
+    if (apiUsernames.length > 0) {
+      return {
+        usernames: apiUsernames.slice(0, config.igDiscoveryMaxProfilesPerHashtag),
+        message: "Discovered via tag API.",
+      };
+    }
+  } catch (error) {
+    if (
+      error instanceof InstagramFrictionError &&
+      ["redirect_loop", "auth_friction"].includes(error.code)
+    ) {
+      apiFallbackReason = error.code === "redirect_loop"
+        ? "Tag API redirected repeatedly; using browser fallback."
+        : "Tag API rejected the session; using browser fallback.";
+    } else {
+      throw error;
+    }
   }
 
   const browserUsernames = await discoverViaBrowser(hashtag, config);
@@ -102,7 +116,7 @@ async function discoverProfilesByHashtag(hashtag, config) {
     usernames: browserUsernames.slice(0, config.igDiscoveryMaxProfilesPerHashtag),
     message:
       browserUsernames.length > 0
-        ? "Discovered via browser fallback."
+        ? apiFallbackReason || "Discovered via browser fallback."
         : "No profiles discovered from hashtag.",
   };
 }
@@ -210,22 +224,47 @@ async function extractUsernameFromPost(context, link, config) {
       link,
     });
 
-    const href = await page.evaluate(() => {
+    const candidate = await page.evaluate(() => {
+      const ogUrl = document
+        .querySelector('meta[property="og:url"]')
+        ?.getAttribute("content");
+      if (ogUrl) {
+        try {
+          const url = new URL(ogUrl, window.location.origin);
+          const parts = url.pathname.split("/").filter(Boolean);
+          if (parts.length >= 2 && parts[1] === "p" && parts[0]) {
+            return parts[0];
+          }
+        } catch (_error) {
+          // ignore malformed metadata and continue with DOM heuristics
+        }
+      }
+
       const anchors = Array.from(document.querySelectorAll("a[href]"));
       for (const anchor of anchors) {
         const hrefValue = anchor.getAttribute("href") || "";
         if (
           /^\/[A-Za-z0-9._]+\/$/.test(hrefValue) &&
+          ![
+            "/reels/",
+            "/explore/",
+            "/accounts/",
+            "/direct/",
+            "/about/",
+            "/legal/",
+            "/web/",
+            "/stories/",
+          ].includes(hrefValue) &&
           !hrefValue.startsWith("/explore/") &&
           !hrefValue.startsWith("/accounts/")
         ) {
-          return hrefValue;
+          return hrefValue.replace(/\//g, "");
         }
       }
       return null;
     });
 
-    return href ? href.replace(/\//g, "") : null;
+    return candidate || null;
   } catch (error) {
     if (error instanceof InstagramFrictionError) {
       throw error;
