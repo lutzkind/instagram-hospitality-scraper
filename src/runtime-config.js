@@ -32,6 +32,7 @@ function getInstagramRuntimeConfigSummary({ store, config }) {
       ],
       maxProfilesPerHashtag: runtime.igDiscoveryMaxProfilesPerHashtag,
       maxProfilesPerJob: runtime.igDiscoveryMaxProfilesPerJob,
+      pageTimeoutMs: runtime.igDiscoveryPageTimeoutMs,
       frictionRetryDelayMs: runtime.igFrictionRetryDelayMs,
     },
   };

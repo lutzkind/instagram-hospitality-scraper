@@ -166,12 +166,14 @@ async function discoverViaBrowser(hashtag, config) {
   ]);
 
   const page = await context.newPage();
+  page.setDefaultNavigationTimeout(config.igDiscoveryPageTimeoutMs);
+  page.setDefaultTimeout(config.igDiscoveryPageTimeoutMs);
   const discovered = new Set();
 
   try {
     await page.goto(`${config.igBaseUrl}/explore/tags/${hashtag}/`, {
       waitUntil: "domcontentloaded",
-      timeout: 60000,
+      timeout: config.igDiscoveryPageTimeoutMs,
     });
     await waitRandom(config.igBrowserWarmupMinMs, config.igBrowserWarmupMaxMs);
     await assertBrowserPageLooksHealthy(page, config, {
@@ -213,8 +215,13 @@ async function discoverViaBrowser(hashtag, config) {
 
 async function extractUsernameFromPost(context, link, config) {
   const page = await context.newPage();
+  page.setDefaultNavigationTimeout(config.igDiscoveryPageTimeoutMs);
+  page.setDefaultTimeout(config.igDiscoveryPageTimeoutMs);
   try {
-    await page.goto(link, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(link, {
+      waitUntil: "domcontentloaded",
+      timeout: config.igDiscoveryPageTimeoutMs,
+    });
     await waitRandom(
       config.igProfileOpenDelayMinMs,
       config.igProfileOpenDelayMaxMs

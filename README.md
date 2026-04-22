@@ -147,19 +147,20 @@ curl -b cookies.txt -L 'http://localhost:3000/jobs/<jobId>/download?format=json'
 - `IG_APP_ID` default `936619743392459`
 - `IG_SESSION_ID` optional Instagram session for hashtag discovery
 - `IG_PROXY_URL` optional proxy for authenticated discovery
-- `IG_REQUEST_DELAY_MS` default `2500`
-- `IG_REQUEST_DELAY_MIN_MS` default `4000`
-- `IG_REQUEST_DELAY_MAX_MS` default `9000`
-- `IG_BROWSER_WARMUP_MIN_MS` default `8000`
-- `IG_BROWSER_WARMUP_MAX_MS` default `18000`
-- `IG_HASHTAG_COOLDOWN_MIN_MS` default `45000`
-- `IG_HASHTAG_COOLDOWN_MAX_MS` default `120000`
-- `IG_PROFILE_OPEN_DELAY_MIN_MS` default `3000`
-- `IG_PROFILE_OPEN_DELAY_MAX_MS` default `7000`
+- `IG_REQUEST_DELAY_MS` default `2000`
+- `IG_REQUEST_DELAY_MIN_MS` default `1500`
+- `IG_REQUEST_DELAY_MAX_MS` default `3500`
+- `IG_BROWSER_WARMUP_MIN_MS` default `1000`
+- `IG_BROWSER_WARMUP_MAX_MS` default `2500`
+- `IG_HASHTAG_COOLDOWN_MIN_MS` default `15000`
+- `IG_HASHTAG_COOLDOWN_MAX_MS` default `30000`
+- `IG_PROFILE_OPEN_DELAY_MIN_MS` default `400`
+- `IG_PROFILE_OPEN_DELAY_MAX_MS` default `900`
 - `IG_DISCOVERY_MAX_PROFILES_PER_HASHTAG` default `50`
 - `IG_DISCOVERY_MAX_PROFILES_PER_JOB` default `150`
-- `IG_DISCOVERY_SCROLL_STEPS` browser fallback scroll passes
-- `IG_DISCOVERY_POST_SAMPLE_LIMIT` post sample limit in browser fallback
+- `IG_DISCOVERY_SCROLL_STEPS` browser fallback scroll passes, default `1`
+- `IG_DISCOVERY_POST_SAMPLE_LIMIT` post sample limit in browser fallback, default `6`
+- `IG_DISCOVERY_PAGE_TIMEOUT_MS` browser page timeout, default `15000`
 - `IG_FRICTION_RETRY_DELAY_MS` default `900000`
 - `CHROMIUM_PATH` default `/usr/bin/chromium`
 
