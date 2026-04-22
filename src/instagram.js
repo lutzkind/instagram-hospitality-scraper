@@ -280,6 +280,8 @@ async function curlJson(url, headers, config) {
     "--silent",
     "--show-error",
     "--location",
+    "--max-redirs",
+    "5",
     "--compressed",
     "--write-out",
     "\\n%{http_code}",
@@ -297,9 +299,21 @@ async function curlJson(url, headers, config) {
     args.unshift("--header");
   }
 
-  const { stdout } = await execFileAsync("curl", args, {
-    maxBuffer: 10 * 1024 * 1024,
-  });
+  let stdout = "";
+  let stderr = "";
+  let curlErrorCode = null;
+  try {
+    const result = await execFileAsync("curl", args, {
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    stdout = result.stdout || "";
+    stderr = result.stderr || "";
+  } catch (error) {
+    stdout = error.stdout || "";
+    stderr = error.stderr || "";
+    curlErrorCode = error.code ?? error.exitCode ?? null;
+  }
+
   const separator = stdout.lastIndexOf("\n");
   const body = separator >= 0 ? stdout.slice(0, separator) : stdout;
   const statusText = separator >= 0 ? stdout.slice(separator + 1).trim() : "";
@@ -315,6 +329,8 @@ async function curlJson(url, headers, config) {
     status,
     body,
     json,
+    stderr,
+    curlErrorCode,
   };
 }
 
@@ -387,10 +403,29 @@ async function assertBrowserPageLooksHealthy(page, config, context = {}) {
 function detectFrictionFromHttpResponse(response, config, options = {}) {
   if (!response) return null;
 
-  const combined = [response.body, JSON.stringify(response.json || {})]
+  const combined = [
+    response.body,
+    response.stderr,
+    JSON.stringify(response.json || {}),
+  ]
     .filter(Boolean)
     .join("\n")
     .toLowerCase();
+
+  if (
+    Number(response.curlErrorCode) === 47 ||
+    combined.includes("maximum (5) redirects followed") ||
+    combined.includes("too many redirects")
+  ) {
+    return new InstagramFrictionError(
+      options.defaultMessage || "Instagram redirected the authenticated request repeatedly.",
+      {
+        code: "redirect_loop",
+        status: response.status || 302,
+        cooldownMs: config.igFrictionRetryDelayMs,
+      }
+    );
+  }
 
   if (response.status === 429) {
     return new InstagramFrictionError(
